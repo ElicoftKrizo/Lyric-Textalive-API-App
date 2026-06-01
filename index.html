@@ -1,0 +1,1107 @@
+<!DOCTYPE html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Lyric Speaker</title>
+
+    <!-- Shippori Mincho from Google Fonts — primary elegant serif -->
+    <link
+      rel="preconnect"
+      href="https://fonts.googleapis.com"
+      crossorigin
+    />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Shippori+Mincho:wght@400;600&family=Noto+Serif+JP:wght@400;700&display=swap"
+      rel="stylesheet"
+    />
+
+    <style>
+      *,
+      *::before,
+      *::after {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: #ffffff;
+        font-family: "Shippori Mincho", "Noto Serif JP", serif;
+      }
+
+      /* Three.js canvas fills the entire viewport */
+      #three-canvas {
+        display: block;
+        width: 100vw;
+        height: 100vh;
+        background: #ffffff;
+      }
+
+      /* ── Overlay UI ────────────────────────────────────────── */
+      #ui-overlay {
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        z-index: 10;
+      }
+
+      /* Top-left: song metadata */
+      #song-info {
+        position: absolute;
+        top: 36px;
+        left: 44px;
+        pointer-events: none;
+        opacity: 0;
+        transition: opacity 0.8s ease;
+      }
+      #song-info.visible {
+        opacity: 1;
+      }
+      #song-title {
+        font-family: "Shippori Mincho", serif;
+        font-size: 13px;
+        font-weight: 600;
+        letter-spacing: 0.18em;
+        color: #1a1a1a;
+        text-transform: uppercase;
+      }
+      #song-artist {
+        font-family: "Noto Serif JP", serif;
+        font-size: 11px;
+        font-weight: 400;
+        letter-spacing: 0.12em;
+        color: #888888;
+        margin-top: 4px;
+      }
+
+      /* Bottom-right: status / source indicator */
+      #status-bar {
+        position: absolute;
+        bottom: 32px;
+        right: 44px;
+        font-family: "Noto Serif JP", serif;
+        font-size: 10px;
+        letter-spacing: 0.2em;
+        color: #cccccc;
+        text-transform: uppercase;
+        pointer-events: none;
+      }
+
+      /* Center: startup prompt */
+      #start-prompt {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        pointer-events: all;
+        transition: opacity 1.2s ease;
+      }
+      #start-prompt.hidden {
+        opacity: 0;
+        pointer-events: none;
+      }
+      #start-prompt h1 {
+        font-family: "Shippori Mincho", serif;
+        font-size: 22px;
+        font-weight: 400;
+        letter-spacing: 0.38em;
+        color: #1a1a1a;
+        margin-bottom: 32px;
+        text-transform: uppercase;
+      }
+      #start-prompt p {
+        font-family: "Noto Serif JP", serif;
+        font-size: 11px;
+        letter-spacing: 0.22em;
+        color: #999999;
+        margin-bottom: 10px;
+        line-height: 1.9;
+        text-align: center;
+        max-width: 380px;
+      }
+      #connect-btn {
+        margin-top: 36px;
+        padding: 12px 44px;
+        background: transparent;
+        border: 1px solid #1a1a1a;
+        font-family: "Shippori Mincho", serif;
+        font-size: 11px;
+        letter-spacing: 0.3em;
+        color: #1a1a1a;
+        text-transform: uppercase;
+        cursor: pointer;
+        transition: background 0.3s, color 0.3s;
+        pointer-events: all;
+      }
+      #connect-btn:hover {
+        background: #1a1a1a;
+        color: #ffffff;
+      }
+
+      /* Progress bar — ultra-thin, bottom edge */
+      #progress-bar-wrap {
+        position: absolute;
+        bottom: 0;
+        left: 0;
+        width: 100%;
+        height: 2px;
+        background: #f0f0f0;
+        pointer-events: none;
+      }
+      #progress-bar-fill {
+        height: 100%;
+        width: 0%;
+        background: #1a1a1a;
+        transition: width 0.25s linear;
+      }
+
+      /* Error toast */
+      #error-toast {
+        position: absolute;
+        bottom: 60px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: #1a1a1a;
+        color: #fff;
+        font-family: "Noto Serif JP", serif;
+        font-size: 11px;
+        letter-spacing: 0.15em;
+        padding: 10px 24px;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.4s ease;
+        white-space: nowrap;
+      }
+      #error-toast.visible {
+        opacity: 1;
+      }
+    </style>
+  </head>
+
+  <body>
+    <canvas id="three-canvas"></canvas>
+
+    <div id="ui-overlay">
+      <div id="song-info">
+        <div id="song-title">—</div>
+        <div id="song-artist">—</div>
+      </div>
+
+      <div id="start-prompt">
+        <h1>Lyric Speaker</h1>
+        <p>
+          Pair your phone to Windows via Bluetooth.<br />
+          Play music — lyrics will appear in 3D space.
+        </p>
+        <p style="font-size:10px; color:#bbbbbb;">
+          Audio source: Windows Bluetooth A2DP loopback<br />
+          Lyric engine: TextAlive App API
+        </p>
+        <button id="connect-btn">Begin</button>
+      </div>
+
+      <div id="status-bar">Standby</div>
+
+      <div id="progress-bar-wrap">
+        <div id="progress-bar-fill"></div>
+      </div>
+
+      <div id="error-toast" id="error-toast"></div>
+    </div>
+
+    <!--
+      Three.js and TextAlive are loaded from node_modules via relative paths.
+      Electron's file:// protocol resolves these correctly. If you are using
+      a bundler, replace these paths with your bundled output.
+    -->
+    <script src="./node_modules/three/build/three.min.js"></script>
+
+    <!--
+      opentype.js is required for THREE.FontLoader / TextGeometry to parse
+      Google Font TTF files at runtime. We load it from a CDN since it is a
+      dev-time tool dependency. In a fully offline build, copy the file locally.
+    -->
+    <script src="https://cdn.jsdelivr.net/npm/opentype.js@1.3.4/dist/opentype.min.js"></script>
+
+    <!--
+      TextAlive App API — UMD bundle from node_modules
+    -->
+    <script src="./node_modules/textalive-app-api/dist/index.js"></script>
+
+    <script>
+      /*
+       * ═══════════════════════════════════════════════════════════════════════
+       *  LYRIC SPEAKER  —  Complete Script
+       *
+       *  Architecture:
+       *   § 1  DOM references
+       *   § 2  Global constants
+       *   § 3  Three.js scene setup
+       *   § 4  Font loading  (opentype.js → TTF at runtime)
+       *   § 5  Glyph → THREE.ShapeGeometry pipeline  (per-character meshes)
+       *   § 6  CharEntry pool  (the live objects being animated)
+       *   § 7  onTextUnitPlay handler  (the Cotodama animation core)
+       *   § 8  Animation loop  (spring slide-in + Z-drift/fade-out)
+       *   § 9  Audio capture  (Windows Bluetooth A2DP loopback)
+       *   §10  TextAlive Player integration
+       *   §11  Startup flow
+       *   §12  Utility helpers + keyboard shortcuts
+       * ═══════════════════════════════════════════════════════════════════════
+       */
+      "use strict";
+
+      /* ──────────────────────────────────────────────────────────
+       * § 1  DOM REFERENCES
+       * ────────────────────────────────────────────────────────── */
+      const canvas       = document.getElementById("three-canvas");
+      const startPrompt  = document.getElementById("start-prompt");
+      const connectBtn   = document.getElementById("connect-btn");
+      const statusBar    = document.getElementById("status-bar");
+      const songInfo     = document.getElementById("song-info");
+      const songTitleEl  = document.getElementById("song-title");
+      const songArtistEl = document.getElementById("song-artist");
+      const progressFill = document.getElementById("progress-bar-fill");
+      const errorToast   = document.getElementById("error-toast");
+
+      /* ──────────────────────────────────────────────────────────
+       * § 2  GLOBAL CONSTANTS
+       * ────────────────────────────────────────────────────────── */
+
+      // Three.js colour values
+      const COL_BLACK = 0x000000;
+      const COL_WHITE = 0xffffff;
+
+      // Shippori Mincho Regular TTF — served by Google Fonts' static CDN.
+      // This URL is a stable, versioned reference to the v15 font file.
+      const FONT_URL =
+        "https://fonts.gstatic.com/s/shipporimincho/v15/" +
+        "VdGGAZweH5EbgHY6YExcZfDoj0BA2_-C7LoS7g.ttf";
+
+      // ── Geometry ──────────────────────────────────────────────
+      // em-size in Three.js world units for one character cell.
+      // At camera Z=14, FOV=40 the frustum half-height at Z=0 is ~5.1 units.
+      // A CHAR_SIZE of 1.2 makes each glyph roughly 24% of screen height,
+      // which mirrors the Cotodama single-character scale.
+      const CHAR_SIZE   = 1.2;
+
+      // Bézier curve subdivision quality per glyph contour.
+      // 4–8 is the sweet spot between smooth curves and vertex count.
+      const CURVE_SEGS  = 5;
+
+      // Horizontal tracking (letter-spacing) added between characters,
+      // expressed as a fraction of CHAR_SIZE.
+      const CHAR_TRACKING = 0.08;
+
+      // ── Spring physics for the slide-in animation ─────────────
+      // Under-damped spring: stiffness drives acceleration toward target;
+      // damping bleeds velocity each frame. Values tuned so a full slide
+      // from spawn_y=-4.2 to rest_y=0 settles in ≈ 18 frames (≈0.3 s at 60fps)
+      // with a gentle overshoot of ~2% — the Cotodama "snap" feel.
+      const SPR_STIFFNESS = 0.068; // acceleration = (target - pos) * stiffness
+      const SPR_DAMPING   = 0.74;  // velocity *= damping  (0.74 ≈ ζ 0.82)
+
+      // ── Per-character stagger for the slide-in ────────────────
+      // Each successive character in a phrase starts its animation
+      // CHAR_STAGGER_MS milliseconds after the previous one.
+      // Kept very short (30 ms) so the word reads as one unit, not a typewriter.
+      const CHAR_STAGGER_MS = 30;
+
+      // Y-position from which each character slides up into view.
+      const SPAWN_Y = -4.2;
+
+      // ── Exit animation ────────────────────────────────────────
+      // When a new phrase arrives, existing character meshes begin:
+      //   • drifting backward along -Z  (DRIFT_Z per frame)
+      //   • fading opacity toward 0     (FADE_RATE per frame)
+      const DRIFT_Z    = 0.055; // world units per frame
+      const FADE_RATE  = 0.030; // opacity units per frame  (full fade ≈ 33 frames)
+
+      /* ──────────────────────────────────────────────────────────
+       * § 3  THREE.JS SCENE SETUP
+       * ────────────────────────────────────────────────────────── */
+      const renderer = new THREE.WebGLRenderer({
+        canvas,
+        antialias:      true,
+        alpha:          false,
+        powerPreference: "high-performance",
+      });
+      renderer.setClearColor(COL_WHITE, 1);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      renderer.setSize(window.innerWidth, window.innerHeight);
+
+      const scene = new THREE.Scene();
+      scene.background = new THREE.Color(COL_WHITE);
+
+      // Perspective camera.
+      // FOV 40° keeps perspective distortion minimal — Cotodama uses an
+      // almost-orthographic feel while still conveying shallow 3D depth.
+      const camera = new THREE.PerspectiveCamera(
+        40,
+        window.innerWidth / window.innerHeight,
+        0.1,
+        500
+      );
+      camera.position.set(0, 0, 14);
+      camera.lookAt(new THREE.Vector3(0, 0, 0));
+
+      // Flat ambient light: black MeshBasicMaterial ignores lighting entirely,
+      // but the ambient light prevents any THREE default-dark artefacts from
+      // other materials (e.g. the ruler mesh).
+      const ambientLight = new THREE.AmbientLight(COL_WHITE, 1.0);
+      scene.add(ambientLight);
+
+      // Ultra-thin horizontal reference line at world-center Y=0.
+      // Opacity 0.55 keeps it subliminal — a Cotodama typographic baseline.
+      const rulerGeo  = new THREE.PlaneGeometry(28, 0.003);
+      const rulerMat  = new THREE.MeshBasicMaterial({
+        color:       0xd8d8d8,
+        transparent: true,
+        opacity:     0.55,
+      });
+      const rulerMesh = new THREE.Mesh(rulerGeo, rulerMat);
+      rulerMesh.position.set(0, 0, 0);
+      scene.add(rulerMesh);
+
+      // Responsive resize
+      window.addEventListener("resize", () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+      });
+
+      /* ──────────────────────────────────────────────────────────
+       * § 4  FONT LOADING
+       *
+       * opentype.js is already loaded from the CDN <script> tag above.
+       * We load the TTF once and cache it in `otFont`.
+       * ────────────────────────────────────────────────────────── */
+      let otFont = null; // opentype.Font instance
+
+      function loadFont() {
+        return new Promise((resolve, reject) => {
+          opentype.load(FONT_URL, (err, font) => {
+            if (err) {
+              console.error("[LyricSpeaker] Font load failed:", err);
+              reject(err);
+              return;
+            }
+            otFont = font;
+            resolve(font);
+          });
+        });
+      }
+
+      /* ──────────────────────────────────────────────────────────
+       * § 5  GLYPH → THREE.ShapeGeometry PIPELINE
+       *
+       * buildGlyphShapes(char, xOffset)
+       *   Converts a single Unicode character into an array of THREE.Shape
+       *   objects using opentype.js path commands. opentype Y-axis is
+       *   positive-down; Three.js is positive-up, so we negate every Y.
+       *   Returns an array of THREE.Shape (may be empty for whitespace).
+       *
+       * buildCharMesh(char, xOffset)
+       *   Wraps buildGlyphShapes in a THREE.Mesh with a cloned black
+       *   MeshBasicMaterial. The mesh is already positioned at xOffset on X
+       *   so that the caller can add it directly to a Group without further
+       *   translation — only Y and Z need to be animated.
+       *
+       * measureString(str)
+       *   Returns the total advance-width (in Three.js world units) of the
+       *   given string, including kerning, so the caller can center the
+       *   character row horizontally.
+       * ────────────────────────────────────────────────────────── */
+
+      /**
+       * Converts opentype path commands for a single glyph into THREE.Shape[].
+       * Each contour becomes one Shape; holes are detected by winding order
+       * and attached as THREE.Path (hole) objects to their parent Shape.
+       *
+       * @param  {opentype.Glyph} glyph       - the glyph object from opentype.js
+       * @param  {number}         xOffset     - horizontal pen position in world units
+       * @param  {number}         emSize      - desired em-size in world units (== CHAR_SIZE)
+       * @returns {THREE.Shape[]}
+       */
+      function buildGlyphShapes(glyph, xOffset, emSize) {
+        const unitsPerEm = otFont.unitsPerEm;
+        const scale      = emSize / unitsPerEm;
+
+        // Retrieve path commands at xOffset=0; we'll apply xOffset ourselves
+        // so we can use xOffset in Three.js world space (not opentype's pixel space).
+        const path = glyph.getPath(0, 0, emSize);
+
+        const shapes   = [];
+        let   current  = null; // THREE.Shape being built
+
+        for (let ci = 0; ci < path.commands.length; ci++) {
+          const cmd = path.commands[ci];
+
+          if (cmd.type === "M") {
+            // Start a new contour
+            current = new THREE.Shape();
+            current.moveTo(xOffset + cmd.x, -cmd.y);
+            shapes.push(current);
+
+          } else if (cmd.type === "L") {
+            if (current) {
+              current.lineTo(xOffset + cmd.x, -cmd.y);
+            }
+
+          } else if (cmd.type === "Q") {
+            // Quadratic Bézier (most CJK/kana strokes use these)
+            if (current) {
+              current.quadraticCurveTo(
+                xOffset + cmd.x1, -cmd.y1,
+                xOffset + cmd.x,  -cmd.y
+              );
+            }
+
+          } else if (cmd.type === "C") {
+            // Cubic Bézier
+            if (current) {
+              current.bezierCurveTo(
+                xOffset + cmd.x1, -cmd.y1,
+                xOffset + cmd.x2, -cmd.y2,
+                xOffset + cmd.x,  -cmd.y
+              );
+            }
+
+          } else if (cmd.type === "Z") {
+            if (current) {
+              current.closePath();
+              current = null;
+            }
+          }
+        }
+
+        return shapes;
+      }
+
+      /**
+       * Returns the advance width of a single glyph in Three.js world units.
+       *
+       * @param  {opentype.Glyph} glyph
+       * @returns {number}
+       */
+      function glyphAdvance(glyph) {
+        return ((glyph.advanceWidth || 0) / otFont.unitsPerEm) * CHAR_SIZE;
+      }
+
+      /**
+       * Returns the kerning offset between two consecutive glyphs in world units.
+       *
+       * @param  {opentype.Glyph} left
+       * @param  {opentype.Glyph} right
+       * @returns {number}
+       */
+      function kernBetween(left, right) {
+        return (otFont.getKerningValue(left, right) / otFont.unitsPerEm) * CHAR_SIZE;
+      }
+
+      /**
+       * Measures the total horizontal width of a string in world units,
+       * including all advance widths, kerning, and tracking.
+       *
+       * @param  {string} text
+       * @returns {number}
+       */
+      function measureString(text) {
+        if (!otFont || !text) return 0;
+        const glyphs = otFont.stringToGlyphs(text);
+        let total = 0;
+        for (let i = 0; i < glyphs.length; i++) {
+          total += glyphAdvance(glyphs[i]) + CHAR_TRACKING;
+          if (i < glyphs.length - 1) {
+            total += kernBetween(glyphs[i], glyphs[i + 1]);
+          }
+        }
+        return total;
+      }
+
+      /**
+       * Builds a THREE.Mesh for a single character glyph.
+       * The mesh is positioned at (xOffset, 0, 0) in local space.
+       * Its material starts at opacity 1.0 and is transparent-capable
+       * so the exit animation can fade it without a material swap.
+       *
+       * Returns null for glyphs with no visible geometry (space, etc.).
+       *
+       * @param  {opentype.Glyph} glyph
+       * @param  {number}         xOffset   - horizontal position in world units
+       * @returns {THREE.Mesh|null}
+       */
+      function buildCharMesh(glyph, xOffset) {
+        const shapes = buildGlyphShapes(glyph, xOffset, CHAR_SIZE);
+        if (!shapes || shapes.length === 0) return null;
+
+        // Merge all contour shapes into a single ShapeGeometry.
+        // THREE.ShapeGeometry accepts an array of Shape objects and
+        // correctly handles holes when the winding order matches SVG fill-rule.
+        const geo = new THREE.ShapeGeometry(shapes, CURVE_SEGS);
+
+        const mat = new THREE.MeshBasicMaterial({
+          color:      COL_BLACK,
+          transparent: true,
+          opacity:    1.0,
+          side:       THREE.DoubleSide,
+          depthWrite: false,
+        });
+
+        return new THREE.Mesh(geo, mat);
+      }
+
+      /* ──────────────────────────────────────────────────────────
+       * § 6  CHAR ENTRY POOL
+       *
+       * A CharEntry represents a single row of character meshes (one
+       * phrase, word, or character unit) currently alive in the scene.
+       *
+       * Structure:
+       *   {
+       *     group:       THREE.Group   — parent transform for the whole row
+       *     chars:       Array<{
+       *                    mesh:       THREE.Mesh — the ShapeGeometry mesh
+       *                    velY:       number     — spring velocity (Y axis)
+       *                    targetY:    number     — spring rest position  (=0)
+       *                    active:     boolean    — false until stagger delay fires
+       *                    startTime:  number     — performance.now() when activated
+       *                  }>
+       *     state:       "entering" | "resting" | "exiting"
+       *   }
+       *
+       * activeRow    — the CharEntry currently sliding in or at rest
+       * exitingRows  — array of CharEntries currently drifting and fading out
+       * ────────────────────────────────────────────────────────── */
+      let activeRow    = null;
+      const exitingRows = [];
+
+      /**
+       * Disposes all GPU resources for a CharEntry and removes it from the scene.
+       *
+       * @param {object} entry - a CharEntry
+       */
+      function disposeEntry(entry) {
+        scene.remove(entry.group);
+        for (let i = 0; i < entry.chars.length; i++) {
+          const c = entry.chars[i];
+          if (c.mesh) {
+            c.mesh.geometry.dispose();
+            c.mesh.material.dispose();
+          }
+        }
+      }
+
+      /* ──────────────────────────────────────────────────────────
+       * § 7  onTextUnitPlay  —  THE COTODAMA ANIMATION CORE
+       *
+       * Called by TextAlive's addListener({ onTextUnitPlay(unit){} })
+       * every time a lyric unit (IChar, IWord, or IPhrase) begins playing.
+       *
+       * TextAlive ITextUnit hierarchy:
+       *
+       *   IPhrase   getType() === 1   — a full phrase/line
+       *     └─ IWord     getType() === 2   — a word (may group kana/kanji)
+       *          └─ IChar    getType() === 3   — a single Unicode character
+       *
+       * Strategy (mirroring char-cube):
+       *   We listen at the PHRASE level for pacing.  When a phrase fires we
+       *   render the entire phrase text as individual character meshes with a
+       *   short stagger delay between each, so the word "arrives" as a sweep
+       *   rather than an instant pop — exactly what Cotodama does.
+       *
+       *   If no phrase-level data is available (some songs have only word-level
+       *   lyrics) we fall through to render the word.  Character-level units are
+       *   handled only when the unit has no parent phrase (standalone chars).
+       *
+       * Per-character mesh layout:
+       *   1. Measure total string width via measureString().
+       *   2. Walk glyphs left-to-right, accumulating pen X.
+       *   3. Each char mesh spawns at (penX - totalWidth/2, SPAWN_Y, 0).
+       *   4. Its stagger delay = charIndex * CHAR_STAGGER_MS.
+       *   5. After the delay, the spring starts pulling its Y toward 0.
+       *
+       * @param {ITextUnit} unit  - TextAlive text unit (IPhrase, IWord or IChar)
+       */
+      function onTextUnitPlay(unit) {
+
+        // ── Guard: ignore null / empty ───────────────────────────
+        if (!unit || typeof unit.text !== "string") return;
+
+        // ── Unit type discrimination ─────────────────────────────
+        // ITextUnit.getType() returns a numeric code:
+        //   1 = IPhrase   (full line)
+        //   2 = IWord
+        //   3 = IChar     (single character)
+        //
+        // We only want to spawn a new row at the phrase or word boundary,
+        // not for every individual character — that would create O(n) rows
+        // per phrase where n = character count.
+        const unitType = unit.getType ? unit.getType() : 0;
+
+        // If this is an IChar (type 3) AND it has a parent word/phrase,
+        // skip it — the parent phrase/word will handle the full render.
+        // We only process IChar when it fires as a top-level unit (type 3
+        // with no parent, or when the player is operating in char-only mode).
+        if (unitType === 3 && unit.parent && unit.parent.text) {
+          return;
+        }
+
+        // Extract the display text.  Prefer the unit's own .text; if it's
+        // an IPhrase we want the full phrase string (which .text provides).
+        const raw = unit.text.trim();
+        if (raw === "") return;
+
+        // ── Push current row to exit queue ───────────────────────
+        if (activeRow !== null) {
+          activeRow.state = "exiting";
+          exitingRows.push(activeRow);
+          activeRow = null;
+        }
+
+        // ── Build the new row ────────────────────────────────────
+        if (!otFont) {
+          console.warn("[LyricSpeaker] Font not loaded yet; skipping unit:", raw);
+          return;
+        }
+
+        const glyphs     = otFont.stringToGlyphs(raw);
+        const totalWidth = measureString(raw);
+        const halfWidth  = totalWidth / 2;
+
+        // Root group: translated so the row is horizontally centred at X=0.
+        // Individual character meshes are positioned relative to this group.
+        const group = new THREE.Group();
+        group.position.set(0, 0, 0);
+        scene.add(group);
+
+        const charEntries = [];
+        let penX = -halfWidth;
+        const spawnTime = performance.now();
+
+        for (let gi = 0; gi < glyphs.length; gi++) {
+          const glyph = glyphs[gi];
+          const adv   = glyphAdvance(glyph) + CHAR_TRACKING;
+          const kern  = gi < glyphs.length - 1
+            ? kernBetween(glyph, glyphs[gi + 1])
+            : 0;
+
+          // Build the mesh.  buildCharMesh positions the geometry at penX
+          // on the X axis; we then place it at SPAWN_Y and animate it up.
+          const mesh = buildCharMesh(glyph, penX);
+
+          if (mesh) {
+            // Start below the viewport
+            mesh.position.y = SPAWN_Y;
+            mesh.position.z = 0;
+            group.add(mesh);
+          }
+
+          charEntries.push({
+            mesh:      mesh,           // null for whitespace glyphs
+            velY:      0,              // spring velocity
+            targetY:   0,              // spring resting position (world centre)
+            active:    false,          // becomes true after stagger delay
+            startTime: spawnTime + gi * CHAR_STAGGER_MS,
+          });
+
+          penX += adv + kern;
+        }
+
+        activeRow = {
+          group:  group,
+          chars:  charEntries,
+          state:  "entering",
+        };
+      }
+
+      /* ──────────────────────────────────────────────────────────
+       * § 8  ANIMATION LOOP
+       *
+       * Called every frame via requestAnimationFrame.
+       *
+       * Phase A  — ENTERING / RESTING:
+       *   For the activeRow, iterate every char entry.  If the current
+       *   time has passed the char's startTime, mark it active and apply
+       *   the under-damped spring toward targetY=0.
+       *
+       *   Spring formula (explicit Euler, stable at 60 fps):
+       *     acceleration = (targetY - currentY) * SPR_STIFFNESS
+       *     velocity     = velocity * SPR_DAMPING + acceleration
+       *     position.y   += velocity
+       *
+       * Phase B  — EXITING:
+       *   For every entry in exitingRows, each frame:
+       *     • group.position.z -= DRIFT_Z   (drift backward into depth)
+       *     • each char mesh.material.opacity -= FADE_RATE  (fade to 0)
+       *   Once all characters in a row have opacity ≤ 0, dispose and
+       *   remove the entry from exitingRows.
+       * ────────────────────────────────────────────────────────── */
+      function tick() {
+        requestAnimationFrame(tick);
+
+        const now = performance.now();
+
+        // ── Phase A: spring slide-in ─────────────────────────────
+        if (activeRow !== null) {
+          let allSettled = true;
+
+          for (let ci = 0; ci < activeRow.chars.length; ci++) {
+            const c = activeRow.chars[ci];
+            if (!c.mesh) continue; // whitespace — no mesh
+
+            if (!c.active) {
+              if (now >= c.startTime) {
+                c.active = true;
+              } else {
+                // Keep mesh parked below until its stagger fires
+                allSettled = false;
+                continue;
+              }
+            }
+
+            // Spring physics
+            const dy  = c.targetY - c.mesh.position.y;
+            c.velY    = c.velY * SPR_DAMPING + dy * SPR_STIFFNESS;
+            c.mesh.position.y += c.velY;
+
+            // Consider settled when velocity is negligible and very close to target
+            if (Math.abs(c.velY) > 0.0005 || Math.abs(dy) > 0.001) {
+              allSettled = false;
+            }
+          }
+
+          if (allSettled) {
+            activeRow.state = "resting";
+          }
+        }
+
+        // ── Phase B: Z-drift + opacity fade for exiting rows ─────
+        for (let ri = exitingRows.length - 1; ri >= 0; ri--) {
+          const row  = exitingRows[ri];
+          const grp  = row.group;
+
+          // Drift the whole group backward in Z
+          grp.position.z -= DRIFT_Z;
+
+          let rowFullyFaded = true;
+
+          for (let ci = 0; ci < row.chars.length; ci++) {
+            const c = row.chars[ci];
+            if (!c.mesh) continue;
+
+            const mat = c.mesh.material;
+            if (mat.opacity > 0) {
+              mat.opacity -= FADE_RATE;
+              if (mat.opacity < 0) {
+                mat.opacity = 0;
+              } else {
+                rowFullyFaded = false;
+              }
+            }
+          }
+
+          if (rowFullyFaded) {
+            disposeEntry(row);
+            exitingRows.splice(ri, 1);
+          }
+        }
+
+        renderer.render(scene, camera);
+      }
+
+      // Kick off the render loop immediately
+      tick();
+
+      /* ──────────────────────────────────────────────────────────
+       * § 9  AUDIO CAPTURE  —  Windows Bluetooth A2DP Loopback
+       *
+       * Strategy (two-stage waterfall):
+       *
+       * Stage 1 — getDisplayMedia() with audio-only:
+       *   Chromium/Electron on Windows exposes the entire system audio
+       *   mix (including Bluetooth A2DP output from a paired phone) as a
+       *   desktop capture source when audio: { mandatory: { chromeMediaSource:
+       *   'desktop' } } is passed. Electron's main.js auto-approves the
+       *   'audioCapture' permission so no OS popup appears.
+       *
+       * Stage 2 — getUserMedia() fallback:
+       *   If getDisplayMedia fails (e.g. on macOS or when the user declines),
+       *   fall back to the default audio input. On Windows this is the system
+       *   default microphone unless the user has set a virtual audio cable
+       *   (VB-Cable, Voicemeeter) as the default input device.
+       *
+       * Web Audio graph:
+       *   MediaStream → MediaStreamSourceNode
+       *     ├─ → audioContext.destination  (pass-through to speakers)
+       *     └─ → MediaStreamDestinationNode
+       *              └─ → HTMLAudioElement.srcObject  (time-source for TextAlive)
+       *
+       * The HTMLAudioElement is muted to prevent double-playback; the
+       * Web Audio pass-through handles actual speaker output.
+       * ────────────────────────────────────────────────────────── */
+      let audioCtx       = null;
+      let audioSrcNode   = null;
+      let audioEl        = null;
+      let captureStream  = null;
+
+      async function initAudioCapture() {
+        // ── Stage 1: desktop audio loopback ─────────────────────
+        try {
+          captureStream = await navigator.mediaDevices.getDisplayMedia({
+            video: false,
+            audio: {
+              mandatory: {
+                chromeMediaSource: "desktop",
+              },
+              echoCancellation:  false,
+              noiseSuppression:  false,
+              autoGainControl:   false,
+              sampleRate:        44100,
+            },
+          });
+          setStatus("System audio loopback captured");
+        } catch (displayErr) {
+          console.warn(
+            "[LyricSpeaker] getDisplayMedia failed, falling back to getUserMedia:",
+            displayErr.message
+          );
+
+          // ── Stage 2: microphone / virtual audio cable ──────────
+          try {
+            captureStream = await navigator.mediaDevices.getUserMedia({
+              audio: {
+                echoCancellation: false,
+                noiseSuppression: false,
+                autoGainControl:  false,
+                sampleRate:       44100,
+              },
+              video: false,
+            });
+            setStatus("Microphone / virtual audio captured");
+          } catch (micErr) {
+            showError("Audio capture failed: " + micErr.message);
+            throw micErr;
+          }
+        }
+
+        // ── Web Audio graph ──────────────────────────────────────
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)({
+          sampleRate:  44100,
+          latencyHint: "playback",
+        });
+
+        audioSrcNode = audioCtx.createMediaStreamSource(captureStream);
+
+        // Branch 1: speaker pass-through (user continues hearing music)
+        audioSrcNode.connect(audioCtx.destination);
+
+        // Branch 2: clean MediaStream destination for <audio> srcObject
+        const destNode = audioCtx.createMediaStreamDestination();
+        audioSrcNode.connect(destNode);
+
+        // HTMLAudioElement used as the time-source by TextAlive
+        audioEl            = document.createElement("audio");
+        audioEl.srcObject  = destNode.stream;
+        audioEl.muted      = true; // already routed to speakers above
+        audioEl.play().catch(e =>
+          console.warn("[LyricSpeaker] audio element .play():", e.message)
+        );
+
+        return audioEl;
+      }
+
+      /* ──────────────────────────────────────────────────────────
+       * §10  TEXTALIVE PLAYER INTEGRATION
+       *
+       * TextAlive App API UMD bundle exposes window.TextAliveAppApi.
+       * We construct a Player, attach our listener object (which contains
+       * the onTextUnitPlay handler from § 7), then call
+       * player.createFromAudioElement(audioEl) to bind the time-sync.
+       *
+       * Listener callbacks used:
+       *   onAppReady(app)       — fires when the Player is initialised
+       *   onVideoReady(v)       — fires when lyric/timing data is loaded
+       *   onTimerReady()        — fires when the sync timer starts
+       *   onTextUnitPlay(unit)  — fires at each lyric unit start time  ← OUR CORE
+       *   onTimeUpdate(pos)     — fires ≈ every 50 ms with playback position
+       *   onPlay / onPause / onStop
+       * ────────────────────────────────────────────────────────── */
+      let player = null;
+
+      async function initTextAlive(sourceAudioEl) {
+        const API = window.TextAliveAppApi;
+        if (!API || !API.Player) {
+          showError(
+            "TextAlive App API not loaded. " +
+            "Check: node_modules/textalive-app-api/dist/index.js"
+          );
+          return;
+        }
+
+        player = new API.Player({
+          app: {
+            // Paste your TextAlive developer token here once registered at
+            // https://developer.textalive.jp — without it the player runs in
+            // public sandbox / managed-host mode only.
+            token: "",
+          },
+          mediaElement: sourceAudioEl,
+        });
+
+        player.addListener({
+
+          // ── Song metadata ──────────────────────────────────────
+          onAppReady(app) {
+            if (!app.managed) {
+              // Not connected to a TextAlive host — standalone mode.
+              setStatus("TextAlive ready  ·  waiting for lyrics data");
+            }
+          },
+
+          onVideoReady(v) {
+            // Lyric timing data has arrived.
+            const title  = (player.data && player.data.song && player.data.song.name)
+              ? player.data.song.name
+              : "—";
+            const artist = (player.data && player.data.song && player.data.song.artist)
+              ? (player.data.song.artist.name || "—")
+              : "—";
+
+            songTitleEl.textContent  = title.toUpperCase();
+            songArtistEl.textContent = artist;
+            songInfo.classList.add("visible");
+            setStatus("Lyrics synchronised");
+          },
+
+          onTimerReady() {
+            setStatus("Playing");
+          },
+
+          // ── CORE LYRIC CALLBACK ────────────────────────────────
+          // This is the complete implementation described in § 7.
+          // We delegate directly to onTextUnitPlay() defined above.
+          onTextUnitPlay(unit) {
+            onTextUnitPlay(unit);
+          },
+
+          // ── Song position (progress bar) ───────────────────────
+          onTimeUpdate(posMs) {
+            if (
+              player         &&
+              player.data    &&
+              player.data.song &&
+              player.data.song.length > 0
+            ) {
+              const pct = (posMs / player.data.song.length) * 100;
+              progressFill.style.width = pct.toFixed(2) + "%";
+            }
+          },
+
+          onPlay()  { setStatus("Playing");  },
+          onPause() { setStatus("Paused");   },
+          onStop()  {
+            setStatus("Stopped");
+            progressFill.style.width = "0%";
+          },
+        });
+
+        // Bind the Player's time-sync mechanism to our audio element.
+        // createFromAudioElement may throw if no song has been identified yet
+        // (expected when Bluetooth streaming starts before a track is recognised).
+        try {
+          await player.createFromAudioElement(sourceAudioEl);
+        } catch (bindErr) {
+          console.warn(
+            "[LyricSpeaker] createFromAudioElement() rejected:",
+            bindErr.message,
+            "— waiting for a new track."
+          );
+          setStatus("Listening for audio stream…");
+        }
+      }
+
+      /* ──────────────────────────────────────────────────────────
+       * §11  STARTUP FLOW
+       *
+       * User clicks "Begin" →
+       *   1. Load Shippori Mincho TTF via opentype.js
+       *   2. Capture Windows system audio (getDisplayMedia loopback)
+       *   3. Initialise TextAlive Player bound to the audio element
+       *
+       * On any failure: show error toast, re-surface the start prompt
+       * after 3 s so the user can retry.
+       * ────────────────────────────────────────────────────────── */
+      connectBtn.addEventListener("click", async () => {
+        startPrompt.classList.add("hidden");
+        setStatus("Loading font…");
+
+        try {
+          await loadFont();
+          setStatus("Font loaded  ·  requesting audio…");
+
+          const el = await initAudioCapture();
+          await initTextAlive(el);
+
+        } catch (err) {
+          console.error("[LyricSpeaker] Startup error:", err);
+          showError(err.message || "Initialisation failed");
+          setTimeout(() => {
+            startPrompt.classList.remove("hidden");
+          }, 3000);
+        }
+      });
+
+      /* ──────────────────────────────────────────────────────────
+       * §12  UTILITY HELPERS + KEYBOARD SHORTCUTS
+       * ────────────────────────────────────────────────────────── */
+
+      /**
+       * Updates the bottom-right status label.
+       * @param {string} msg
+       */
+      function setStatus(msg) {
+        statusBar.textContent = msg.toUpperCase();
+      }
+
+      /**
+       * Shows a transient error toast for 5 seconds.
+       * @param {string} msg
+       */
+      function showError(msg) {
+        errorToast.textContent = msg;
+        errorToast.classList.add("visible");
+        setTimeout(() => {
+          errorToast.classList.remove("visible");
+        }, 5000);
+      }
+
+      // Space  → play / pause
+      // R      → stop and reset progress bar
+      // Escape → same as R
+      document.addEventListener("keydown", (e) => {
+        if (!player) return;
+
+        if (e.code === "Space") {
+          e.preventDefault();
+          if (player.isPlaying) {
+            player.requestPause();
+          } else {
+            player.requestPlay();
+          }
+        }
+
+        if (e.code === "KeyR" || e.code === "Escape") {
+          player.requestStop();
+          progressFill.style.width = "0%";
+        }
+      });
+    </script>
+  </body>
+</html>

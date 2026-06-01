@@ -1,0 +1,39 @@
+{
+  "name": "cotodama-lyric-speaker",
+  "version": "1.0.0",
+  "description": "Minimalist 3D lyric visualization desktop app inspired by Cotodama Lyric Speaker",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder"
+  },
+  "dependencies": {
+    "textalive-app-api": "^0.5.0",
+    "three": "^0.163.0"
+  },
+  "devDependencies": {
+    "electron": "^30.0.1",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.cotodama.lyricspeaker",
+    "productName": "Lyric Speaker",
+    "win": {
+      "target": "nsis"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  },
+  "keywords": [
+    "electron",
+    "threejs",
+    "textalive",
+    "lyric",
+    "visualization",
+    "cotodama"
+  ],
+  "author": "Eli",
+  "license": "MIT"
+}
