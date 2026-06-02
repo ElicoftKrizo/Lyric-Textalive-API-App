@@ -8,8 +8,12 @@
     "build": "electron-builder"
   },
   "dependencies": {
-    "textalive-app-api": "^0.5.0",
-    "three": "^0.163.0"
+    "airplay-server": "^1.1.0",
+    "express": "^5.2.1",
+    "socket.io": "^4.8.3",
+    "textalive-app-api": "0.4.0",
+    "three": "^0.163.0",
+    "speaker": "^0.5.5"
   },
   "devDependencies": {
     "electron": "^30.0.1",
