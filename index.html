@@ -182,7 +182,19 @@
       #error-toast.visible {
         opacity: 1;
       }
-    </style>
+
+      @keyframes pulse {
+        0% { opacity: 0.5; transform: scale(0.98); }
+        50% { opacity: 1; transform: scale(1.02); }
+        100% { opacity: 0.5; transform: scale(0.98); }
+      }
+      .searching {
+        animation: pulse 2s infinite ease-in-out;
+        color: #888;
+      }
+
+
+      </style>
   </head>
 
   <body>
@@ -194,18 +206,22 @@
         <div id="song-artist">—</div>
       </div>
 
+
+
+
+
       <div id="start-prompt">
         <h1>Lyric Speaker</h1>
-        <p>
-          Pair your phone to Windows via Bluetooth.<br />
-          Play music — lyrics will appear in 3D space.
+        <p id="prompt-desc">
+          Dual Receiver Mode<br />
+          AirPlay (iOS) or Classic Bluetooth (Android)
         </p>
-        <p style="font-size:10px; color:#bbbbbb;">
-          Audio source: Windows Bluetooth A2DP loopback<br />
-          Lyric engine: TextAlive App API
-        </p>
-        <button id="connect-btn">Begin</button>
+        <button id="connect-btn">Connect Device</button>
       </div>
+
+
+
+
 
       <div id="status-bar">Standby</div>
 
@@ -289,7 +305,7 @@
       // At camera Z=14, FOV=40 the frustum half-height at Z=0 is ~5.1 units.
       // A CHAR_SIZE of 1.2 makes each glyph roughly 24% of screen height,
       // which mirrors the Cotodama single-character scale.
-      const CHAR_SIZE   = 1.2;
+      let CHAR_SIZE   = 1.2;
 
       // Bézier curve subdivision quality per glyph contour.
       // 4–8 is the sweet spot between smooth curves and vertex count.
@@ -304,8 +320,8 @@
       // damping bleeds velocity each frame. Values tuned so a full slide
       // from spawn_y=-4.2 to rest_y=0 settles in ≈ 18 frames (≈0.3 s at 60fps)
       // with a gentle overshoot of ~2% — the Cotodama "snap" feel.
-      const SPR_STIFFNESS = 0.068; // acceleration = (target - pos) * stiffness
-      const SPR_DAMPING   = 0.74;  // velocity *= damping  (0.74 ≈ ζ 0.82)
+      let SPR_STIFFNESS = 0.068; // acceleration = (target - pos) * stiffness
+      let SPR_DAMPING   = 0.74;  // velocity *= damping  (0.74 ≈ ζ 0.82)
 
       // ── Per-character stagger for the slide-in ────────────────
       // Each successive character in a phrase starts its animation
@@ -491,7 +507,7 @@
        * @returns {number}
        */
       function glyphAdvance(glyph) {
-        return ((glyph.advanceWidth || 0) / otFont.unitsPerEm) * CHAR_SIZE;
+        return ((glyph.advanceWidth || 0) / otFont.unitsPerEm) * CHAR_SIZE_DYN;
       }
 
       /**
@@ -502,7 +518,7 @@
        * @returns {number}
        */
       function kernBetween(left, right) {
-        return (otFont.getKerningValue(left, right) / otFont.unitsPerEm) * CHAR_SIZE;
+        return (otFont.getKerningValue(left, right) / otFont.unitsPerEm) * (typeof CHAR_SIZE_DYN !== "undefined" ? CHAR_SIZE_DYN : CHAR_SIZE);
       }
 
       /**
@@ -538,7 +554,7 @@
        * @returns {THREE.Mesh|null}
        */
       function buildCharMesh(glyph, xOffset) {
-        const shapes = buildGlyphShapes(glyph, xOffset, CHAR_SIZE);
+        const shapes = buildGlyphShapes(glyph, xOffset, CHAR_SIZE_DYN);
         if (!shapes || shapes.length === 0) return null;
 
         // Merge all contour shapes into a single ShapeGeometry.
@@ -768,7 +784,7 @@
 
             // Spring physics
             const dy  = c.targetY - c.mesh.position.y;
-            c.velY    = c.velY * SPR_DAMPING + dy * SPR_STIFFNESS;
+            c.velY    = c.velY * SPR_DAMPING_DYN + dy * SPR_STIFFNESS_DYN;
             c.mesh.position.y += c.velY;
 
             // Consider settled when velocity is negligible and very close to target
@@ -966,6 +982,21 @@
           },
 
           onVideoReady(v) {
+            // Analyze the mood/vibe from tempo or beats
+            if (player && player.data && player.data.song && player.data.song.tempo) {
+                if (player.data.song.tempo > 120) {
+                    currentVibe = "energetic";
+                } else {
+                    currentVibe = "calming";
+                }
+            } else {
+               currentVibe = "calming";
+            }
+            if (typeof updatePhysicsParams !== "undefined") {
+               updatePhysicsParams();
+            }
+            startPrompt.classList.add("hidden");
+
             // Lyric timing data has arrived.
             const title  = (player.data && player.data.song && player.data.song.name)
               ? player.data.song.name
@@ -1028,34 +1059,97 @@
       }
 
       /* ──────────────────────────────────────────────────────────
-       * §11  STARTUP FLOW
-       *
-       * User clicks "Begin" →
-       *   1. Load Shippori Mincho TTF via opentype.js
-       *   2. Capture Windows system audio (getDisplayMedia loopback)
-       *   3. Initialise TextAlive Player bound to the audio element
-       *
-       * On any failure: show error toast, re-surface the start prompt
-       * after 3 s so the user can retry.
+       * §11  STARTUP FLOW (DUAL RECEIVERS)
        * ────────────────────────────────────────────────────────── */
-      connectBtn.addEventListener("click", async () => {
-        startPrompt.classList.add("hidden");
-        setStatus("Loading font…");
+
+      let currentVibe = "calming"; // "calming" or "energetic"
+
+      let SPR_STIFFNESS_DYN = SPR_STIFFNESS;
+      let SPR_DAMPING_DYN = SPR_DAMPING;
+      let CHAR_SIZE_DYN = CHAR_SIZE;
+
+      function updatePhysicsParams() {
+          if (currentVibe === "energetic") {
+              // energetic: sharp, rapid, hard-hitting
+              SPR_STIFFNESS_DYN = 0.15;
+              SPR_DAMPING_DYN = 0.60;
+              CHAR_SIZE_DYN = CHAR_SIZE * 1.5; // Larger typography scaling
+          } else {
+              // calming: elegant, smooth, flowing
+              SPR_STIFFNESS_DYN = 0.03;
+              SPR_DAMPING_DYN = 0.85;
+              CHAR_SIZE_DYN = CHAR_SIZE;
+          }
+      }
+
+      async function startReceivers() {
+        startPrompt.classList.remove("hidden");
+        const btn = document.getElementById('connect-btn');
+        const desc = document.getElementById('prompt-desc');
+
+        btn.style.display = 'none';
+        if (desc) {
+          desc.innerHTML = "Searching for connections...<br/>Play audio via AirPlay or Bluetooth A2DP";
+          desc.classList.add("searching");
+        }
+        setStatus("Listening...");
 
         try {
           await loadFont();
-          setStatus("Font loaded  ·  requesting audio…");
 
+          // 1. Start System Audio Capture (For Bluetooth A2DP loopback)
           const el = await initAudioCapture();
           await initTextAlive(el);
+
+          // 2. Start AirPlay Server via IPC
+          if (window.electronAPI) {
+            window.electronAPI.onAirplayStatus((_event, value) => {
+              console.log(value);
+              if (value.startsWith('Connected:')) {
+                setStatus(value);
+                if (desc) {
+                  desc.classList.remove("searching");
+                  desc.innerHTML = value + "<br/>Waiting for playback...";
+                }
+              }
+            });
+            window.electronAPI.onAirplayEvent((_event, value) => {
+              if (value === 'play') {
+                console.log('Airplay client playing');
+                startPrompt.classList.add("hidden");
+                setStatus("Playing (AirPlay)");
+              } else if (value === 'stop') {
+                console.log('Airplay client stopped');
+              }
+            });
+            window.electronAPI.onAirplayError((_event, value) => {
+              showError("Airplay error: " + value);
+            });
+
+            window.electronAPI.startAirplay();
+          }
+
+          // Automatically hide prompt if Audio context starts resolving real media
+          if (typeof audioEl !== 'undefined' && audioEl) {
+             audioEl.addEventListener('play', () => {
+               startPrompt.classList.add("hidden");
+               setStatus("Connected via Bluetooth");
+             });
+          }
 
         } catch (err) {
           console.error("[LyricSpeaker] Startup error:", err);
           showError(err.message || "Initialisation failed");
-          setTimeout(() => {
-            startPrompt.classList.remove("hidden");
-          }, 3000);
+          if (desc) {
+            desc.classList.remove("searching");
+            desc.innerHTML = "Dual Receiver Mode<br />AirPlay (iOS) or Classic Bluetooth (Android)";
+          }
+          btn.style.display = 'block';
         }
+      }
+
+      connectBtn.addEventListener("click", () => {
+         startReceivers();
       });
 
       /* ──────────────────────────────────────────────────────────
