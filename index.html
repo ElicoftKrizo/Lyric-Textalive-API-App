@@ -5,12 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Lyric Speaker</title>
 
-    <!-- Shippori Mincho from Google Fonts — primary elegant serif -->
-    <link
-      rel="preconnect"
-      href="https://fonts.googleapis.com"
-      crossorigin
-    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" crossorigin />
     <link
       href="https://fonts.googleapis.com/css2?family=Shippori+Mincho:wght@400;600&family=Noto+Serif+JP:wght@400;700&display=swap"
       rel="stylesheet"
@@ -34,7 +29,6 @@
         font-family: "Shippori Mincho", "Noto Serif JP", serif;
       }
 
-      /* Three.js canvas fills the entire viewport */
       #three-canvas {
         display: block;
         width: 100vw;
@@ -42,7 +36,6 @@
         background: #ffffff;
       }
 
-      /* ── Overlay UI ────────────────────────────────────────── */
       #ui-overlay {
         position: fixed;
         inset: 0;
@@ -50,7 +43,6 @@
         z-index: 10;
       }
 
-      /* Top-left: song metadata */
       #song-info {
         position: absolute;
         top: 36px;
@@ -79,7 +71,6 @@
         margin-top: 4px;
       }
 
-      /* Bottom-right: status / source indicator */
       #status-bar {
         position: absolute;
         bottom: 32px;
@@ -92,7 +83,6 @@
         pointer-events: none;
       }
 
-      /* Center: startup prompt */
       #start-prompt {
         position: absolute;
         inset: 0;
@@ -124,10 +114,28 @@
         margin-bottom: 10px;
         line-height: 1.9;
         text-align: center;
-        max-width: 380px;
+        max-width: 420px;
+      }
+      #song-url {
+        margin-top: 22px;
+        width: 420px;
+        max-width: 70vw;
+        padding: 10px 14px;
+        background: transparent;
+        border: 1px solid #d8d8d8;
+        font-family: "Noto Serif JP", serif;
+        font-size: 11px;
+        letter-spacing: 0.08em;
+        color: #1a1a1a;
+        text-align: center;
+        pointer-events: all;
+        outline: none;
+      }
+      #song-url:focus {
+        border-color: #1a1a1a;
       }
       #connect-btn {
-        margin-top: 36px;
+        margin-top: 24px;
         padding: 12px 44px;
         background: transparent;
         border: 1px solid #1a1a1a;
@@ -145,7 +153,6 @@
         color: #ffffff;
       }
 
-      /* Progress bar — ultra-thin, bottom edge */
       #progress-bar-wrap {
         position: absolute;
         bottom: 0;
@@ -162,7 +169,6 @@
         transition: width 0.25s linear;
       }
 
-      /* Error toast */
       #error-toast {
         position: absolute;
         bottom: 60px;
@@ -192,18 +198,17 @@
         animation: pulse 2s infinite ease-in-out;
         color: #888;
       }
+    </style>
 
-
-      @keyframes pulse {
-        0% { opacity: 0.5; transform: scale(0.98); }
-        50% { opacity: 1; transform: scale(1.02); }
-        100% { opacity: 0.5; transform: scale(0.98); }
+    <!-- three's ESM build resolved via import map. Served over app:// (see main.js)
+         so module + import-map resolution works; this would CORS-fail over file://. -->
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "/node_modules/three/build/three.module.js"
+        }
       }
-      .searching {
-        animation: pulse 2s infinite ease-in-out;
-        color: #888;
-      }
-</style>
+    </script>
   </head>
 
   <body>
@@ -215,22 +220,20 @@
         <div id="song-artist">—</div>
       </div>
 
-
-
-
-
       <div id="start-prompt">
         <h1>Lyric Speaker</h1>
         <p id="prompt-desc">
-          Dual Receiver Mode<br />
-          AirPlay (iOS) or Classic Bluetooth (Android)
+          Paste a TextAlive-registered song URL<br />
+          (e.g. a piapro / YouTube / SoundCloud link indexed by TextAlive)
         </p>
-        <button id="connect-btn">Connect Device</button>
+        <input
+          id="song-url"
+          type="text"
+          spellcheck="false"
+          placeholder="https://piapro.jp/t/..."
+        />
+        <button id="connect-btn">Load Song</button>
       </div>
-
-
-
-
 
       <div id="status-bar">Standby</div>
 
@@ -238,123 +241,59 @@
         <div id="progress-bar-fill"></div>
       </div>
 
-      <div id="error-toast" id="error-toast"></div>
+      <div id="error-toast"></div>
     </div>
 
-    <!--
-      Three.js and TextAlive are loaded from node_modules via relative paths.
-      Electron's file:// protocol resolves these correctly. If you are using
-      a bundler, replace these paths with your bundled output.
-    -->
-    <script src="./node_modules/three/build/three.min.js"></script>
-
-    <!--
-      opentype.js is required for THREE.FontLoader / TextGeometry to parse
-      Google Font TTF files at runtime. We load it from a CDN since it is a
-      dev-time tool dependency. In a fully offline build, copy the file locally.
-    -->
+    <!-- opentype.js (TTF -> glyph paths) as a classic global. -->
     <script src="https://cdn.jsdelivr.net/npm/opentype.js@1.3.4/dist/opentype.min.js"></script>
+    <!-- TextAlive App API UMD bundle; exposes window.TextAliveApp. -->
+    <script src="/node_modules/textalive-app-api/dist/index.js"></script>
 
-    <!--
-      TextAlive App API — UMD bundle from node_modules
-    -->
-    <script src="./node_modules/textalive-app-api/dist/index.js"></script>
-
-    <script>
-      /*
-       * ═══════════════════════════════════════════════════════════════════════
-       *  LYRIC SPEAKER  —  Complete Script
-       *
-       *  Architecture:
-       *   § 1  DOM references
-       *   § 2  Global constants
-       *   § 3  Three.js scene setup
-       *   § 4  Font loading  (opentype.js → TTF at runtime)
-       *   § 5  Glyph → THREE.ShapeGeometry pipeline  (per-character meshes)
-       *   § 6  CharEntry pool  (the live objects being animated)
-       *   § 7  onTextUnitPlay handler  (the Cotodama animation core)
-       *   § 8  Animation loop  (spring slide-in + Z-drift/fade-out)
-       *   § 9  Audio capture  (Windows Bluetooth A2DP loopback)
-       *   §10  TextAlive Player integration
-       *   §11  Startup flow
-       *   §12  Utility helpers + keyboard shortcuts
-       * ═══════════════════════════════════════════════════════════════════════
-       */
+    <script type="module">
       "use strict";
+      import * as THREE from "three";
+      import { sampleMood, moodToMotion } from "/mood-engine.js";
 
-      /* ──────────────────────────────────────────────────────────
-       * § 1  DOM REFERENCES
-       * ────────────────────────────────────────────────────────── */
-      const canvas       = document.getElementById("three-canvas");
-      const startPrompt  = document.getElementById("start-prompt");
-      const connectBtn   = document.getElementById("connect-btn");
-      const statusBar    = document.getElementById("status-bar");
-      const songInfo     = document.getElementById("song-info");
-      const songTitleEl  = document.getElementById("song-title");
+      /* ── § 1  DOM REFERENCES ─────────────────────────────────────────── */
+      const canvas = document.getElementById("three-canvas");
+      const startPrompt = document.getElementById("start-prompt");
+      const connectBtn = document.getElementById("connect-btn");
+      const songUrlInput = document.getElementById("song-url");
+      const promptDesc = document.getElementById("prompt-desc");
+      const statusBar = document.getElementById("status-bar");
+      const songInfo = document.getElementById("song-info");
+      const songTitleEl = document.getElementById("song-title");
       const songArtistEl = document.getElementById("song-artist");
       const progressFill = document.getElementById("progress-bar-fill");
-      const errorToast   = document.getElementById("error-toast");
+      const errorToast = document.getElementById("error-toast");
 
-      /* ──────────────────────────────────────────────────────────
-       * § 2  GLOBAL CONSTANTS
-       * ────────────────────────────────────────────────────────── */
-
-      // Three.js colour values
-      const COL_BLACK = 0x000000;
+      /* ── § 2  CONSTANTS ──────────────────────────────────────────────── */
       const COL_WHITE = 0xffffff;
 
-      // Shippori Mincho Regular TTF — served by Google Fonts' static CDN.
-      // This URL is a stable, versioned reference to the v15 font file.
-      const FONT_URL =
+      // Paste your TextAlive developer token (https://developer.textalive.jp).
+      // Without a valid token, song loading will be rejected by the platform.
+      const TEXTALIVE_TOKEN = "";
+
+      // Optional bold sans TTF for the "energetic" profile (feature #1's serif
+      // <-> sans contrast). Leave "" to always use the serif; the mood engine
+      // still asks for "sans" but the renderer falls back gracefully.
+      const SANS_FONT_URL = "";
+
+      // Shippori Mincho Regular TTF (Google Fonts static CDN).
+      const SERIF_FONT_URL =
         "https://fonts.gstatic.com/s/shipporimincho/v15/" +
         "VdGGAZweH5EbgHY6YExcZfDoj0BA2_-C7LoS7g.ttf";
 
-      // ── Geometry ──────────────────────────────────────────────
-      // em-size in Three.js world units for one character cell.
-      // At camera Z=14, FOV=40 the frustum half-height at Z=0 is ~5.1 units.
-      // A CHAR_SIZE of 1.2 makes each glyph roughly 24% of screen height,
-      // which mirrors the Cotodama single-character scale.
-      let CHAR_SIZE   = 1.2;
+      const CHAR_SIZE = 1.2; // base em-size in world units
+      const CURVE_SEGS = 5; // bézier subdivisions per contour
+      const CHAR_STAGGER_MS = 30; // slide-in stagger between characters
+      const DRIFT_Z = 0.055; // exit Z-drift per frame
 
-      // Bézier curve subdivision quality per glyph contour.
-      // 4–8 is the sweet spot between smooth curves and vertex count.
-      const CURVE_SEGS  = 5;
-
-      // Horizontal tracking (letter-spacing) added between characters,
-      // expressed as a fraction of CHAR_SIZE.
-      const CHAR_TRACKING = 0.08;
-
-      // ── Spring physics for the slide-in animation ─────────────
-      // Under-damped spring: stiffness drives acceleration toward target;
-      // damping bleeds velocity each frame. Values tuned so a full slide
-      // from spawn_y=-4.2 to rest_y=0 settles in ≈ 18 frames (≈0.3 s at 60fps)
-      // with a gentle overshoot of ~2% — the Cotodama "snap" feel.
-      let SPR_STIFFNESS = 0.068; // acceleration = (target - pos) * stiffness
-      let SPR_DAMPING   = 0.74;  // velocity *= damping  (0.74 ≈ ζ 0.82)
-
-      // ── Per-character stagger for the slide-in ────────────────
-      // Each successive character in a phrase starts its animation
-      // CHAR_STAGGER_MS milliseconds after the previous one.
-      // Kept very short (30 ms) so the word reads as one unit, not a typewriter.
-      const CHAR_STAGGER_MS = 30;
-
-      // Y-position from which each character slides up into view.
-      const SPAWN_Y = -4.2;
-
-      // ── Exit animation ────────────────────────────────────────
-      // When a new phrase arrives, existing character meshes begin:
-      //   • drifting backward along -Z  (DRIFT_Z per frame)
-      //   • fading opacity toward 0     (FADE_RATE per frame)
-      const DRIFT_Z    = 0.055; // world units per frame
-      const FADE_RATE  = 0.030; // opacity units per frame  (full fade ≈ 33 frames)
-
-      /* ──────────────────────────────────────────────────────────
-       * § 3  THREE.JS SCENE SETUP
-       * ────────────────────────────────────────────────────────── */
+      /* ── § 3  THREE.JS SCENE ─────────────────────────────────────────── */
       const renderer = new THREE.WebGLRenderer({
         canvas,
-        antialias:      true,
-        alpha:          false,
+        antialias: true,
+        alpha: false,
         powerPreference: "high-performance",
       });
       renderer.setClearColor(COL_WHITE, 1);
@@ -364,9 +303,6 @@
       const scene = new THREE.Scene();
       scene.background = new THREE.Color(COL_WHITE);
 
-      // Perspective camera.
-      // FOV 40° keeps perspective distortion minimal — Cotodama uses an
-      // almost-orthographic feel while still conveying shallow 3D depth.
       const camera = new THREE.PerspectiveCamera(
         40,
         window.innerWidth / window.innerHeight,
@@ -374,248 +310,104 @@
         500
       );
       camera.position.set(0, 0, 14);
-      camera.lookAt(new THREE.Vector3(0, 0, 0));
+      camera.lookAt(0, 0, 0);
 
-      // Flat ambient light: black MeshBasicMaterial ignores lighting entirely,
-      // but the ambient light prevents any THREE default-dark artefacts from
-      // other materials (e.g. the ruler mesh).
-      const ambientLight = new THREE.AmbientLight(COL_WHITE, 1.0);
-      scene.add(ambientLight);
+      scene.add(new THREE.AmbientLight(COL_WHITE, 1.0));
 
-      // Ultra-thin horizontal reference line at world-center Y=0.
-      // Opacity 0.55 keeps it subliminal — a Cotodama typographic baseline.
-      const rulerGeo  = new THREE.PlaneGeometry(28, 0.003);
-      const rulerMat  = new THREE.MeshBasicMaterial({
-        color:       0xd8d8d8,
-        transparent: true,
-        opacity:     0.55,
-      });
-      const rulerMesh = new THREE.Mesh(rulerGeo, rulerMat);
-      rulerMesh.position.set(0, 0, 0);
+      const rulerMesh = new THREE.Mesh(
+        new THREE.PlaneGeometry(28, 0.003),
+        new THREE.MeshBasicMaterial({ color: 0xd8d8d8, transparent: true, opacity: 0.55 })
+      );
       scene.add(rulerMesh);
 
-      // Responsive resize
       window.addEventListener("resize", () => {
         camera.aspect = window.innerWidth / window.innerHeight;
         camera.updateProjectionMatrix();
         renderer.setSize(window.innerWidth, window.innerHeight);
       });
 
-      /* ──────────────────────────────────────────────────────────
-       * § 4  FONT LOADING
-       *
-       * opentype.js is already loaded from the CDN <script> tag above.
-       * We load the TTF once and cache it in `otFont`.
-       * ────────────────────────────────────────────────────────── */
-      let otFont = null; // opentype.Font instance
+      /* ── § 4  FONT LOADING ───────────────────────────────────────────── */
+      let otSerif = null;
+      let otSans = null;
 
-      function loadFont() {
+      function loadFont(url) {
         return new Promise((resolve, reject) => {
-          opentype.load(FONT_URL, (err, font) => {
-            if (err) {
-              console.error("[LyricSpeaker] Font load failed:", err);
-              reject(err);
-              return;
-            }
-            otFont = font;
-            resolve(font);
-          });
+          opentype.load(url, (err, font) => (err ? reject(err) : resolve(font)));
         });
       }
 
-      /* ──────────────────────────────────────────────────────────
-       * § 5  GLYPH → THREE.ShapeGeometry PIPELINE
-       *
-       * buildGlyphShapes(char, xOffset)
-       *   Converts a single Unicode character into an array of THREE.Shape
-       *   objects using opentype.js path commands. opentype Y-axis is
-       *   positive-down; Three.js is positive-up, so we negate every Y.
-       *   Returns an array of THREE.Shape (may be empty for whitespace).
-       *
-       * buildCharMesh(char, xOffset)
-       *   Wraps buildGlyphShapes in a THREE.Mesh with a cloned black
-       *   MeshBasicMaterial. The mesh is already positioned at xOffset on X
-       *   so that the caller can add it directly to a Group without further
-       *   translation — only Y and Z need to be animated.
-       *
-       * measureString(str)
-       *   Returns the total advance-width (in Three.js world units) of the
-       *   given string, including kerning, so the caller can center the
-       *   character row horizontally.
-       * ────────────────────────────────────────────────────────── */
-
-      /**
-       * Converts opentype path commands for a single glyph into THREE.Shape[].
-       * Each contour becomes one Shape; holes are detected by winding order
-       * and attached as THREE.Path (hole) objects to their parent Shape.
-       *
-       * @param  {opentype.Glyph} glyph       - the glyph object from opentype.js
-       * @param  {number}         xOffset     - horizontal pen position in world units
-       * @param  {number}         emSize      - desired em-size in world units (== CHAR_SIZE)
-       * @returns {THREE.Shape[]}
-       */
+      /* ── § 5  GLYPH → ShapeGeometry PIPELINE ─────────────────────────────
+       * opentype getPath(0,0,emSize) returns coordinates already scaled to
+       * emSize (in world units when emSize is in world units), Y positive-down;
+       * Three.js is Y-up, so we negate Y. xOffset is applied in the same space. */
       function buildGlyphShapes(glyph, xOffset, emSize) {
-        const unitsPerEm = otFont.unitsPerEm;
-        const scale      = emSize / unitsPerEm;
-
-        // Retrieve path commands at xOffset=0; we'll apply xOffset ourselves
-        // so we can use xOffset in Three.js world space (not opentype's pixel space).
         const path = glyph.getPath(0, 0, emSize);
-
-        const shapes   = [];
-        let   current  = null; // THREE.Shape being built
-
-        for (let ci = 0; ci < path.commands.length; ci++) {
-          const cmd = path.commands[ci];
-
+        const shapes = [];
+        let current = null;
+        for (const cmd of path.commands) {
           if (cmd.type === "M") {
-            // Start a new contour
             current = new THREE.Shape();
             current.moveTo(xOffset + cmd.x, -cmd.y);
             shapes.push(current);
-
-          } else if (cmd.type === "L") {
-            if (current) {
-              current.lineTo(xOffset + cmd.x, -cmd.y);
-            }
-
-          } else if (cmd.type === "Q") {
-            // Quadratic Bézier (most CJK/kana strokes use these)
-            if (current) {
-              current.quadraticCurveTo(
-                xOffset + cmd.x1, -cmd.y1,
-                xOffset + cmd.x,  -cmd.y
-              );
-            }
-
-          } else if (cmd.type === "C") {
-            // Cubic Bézier
-            if (current) {
-              current.bezierCurveTo(
-                xOffset + cmd.x1, -cmd.y1,
-                xOffset + cmd.x2, -cmd.y2,
-                xOffset + cmd.x,  -cmd.y
-              );
-            }
-
-          } else if (cmd.type === "Z") {
-            if (current) {
-              current.closePath();
-              current = null;
-            }
+          } else if (cmd.type === "L" && current) {
+            current.lineTo(xOffset + cmd.x, -cmd.y);
+          } else if (cmd.type === "Q" && current) {
+            current.quadraticCurveTo(xOffset + cmd.x1, -cmd.y1, xOffset + cmd.x, -cmd.y);
+          } else if (cmd.type === "C" && current) {
+            current.bezierCurveTo(
+              xOffset + cmd.x1, -cmd.y1,
+              xOffset + cmd.x2, -cmd.y2,
+              xOffset + cmd.x, -cmd.y
+            );
+          } else if (cmd.type === "Z" && current) {
+            current.closePath();
+            current = null;
           }
         }
-
         return shapes;
       }
 
-      /**
-       * Returns the advance width of a single glyph in Three.js world units.
-       *
-       * @param  {opentype.Glyph} glyph
-       * @returns {number}
-       */
-      function glyphAdvance(glyph) {
-        return ((glyph.advanceWidth || 0) / otFont.unitsPerEm) * CHAR_SIZE_DYN;
+      function glyphAdvance(font, glyph, emSize) {
+        return ((glyph.advanceWidth || 0) / font.unitsPerEm) * emSize;
       }
 
-      /**
-       * Returns the kerning offset between two consecutive glyphs in world units.
-       *
-       * @param  {opentype.Glyph} left
-       * @param  {opentype.Glyph} right
-       * @returns {number}
-       */
-      function kernBetween(left, right) {
-        return (otFont.getKerningValue(left, right) / otFont.unitsPerEm) * (typeof CHAR_SIZE_DYN !== "undefined" ? CHAR_SIZE_DYN : CHAR_SIZE);
+      function kernBetween(font, left, right, emSize) {
+        return (font.getKerningValue(left, right) / font.unitsPerEm) * emSize;
       }
 
-      /**
-       * Measures the total horizontal width of a string in world units,
-       * including all advance widths, kerning, and tracking.
-       *
-       * @param  {string} text
-       * @returns {number}
-       */
-      function measureString(text) {
-        if (!otFont || !text) return 0;
-        const glyphs = otFont.stringToGlyphs(text);
+      function measureString(font, text, emSize, tracking) {
+        const glyphs = font.stringToGlyphs(text);
         let total = 0;
         for (let i = 0; i < glyphs.length; i++) {
-          total += glyphAdvance(glyphs[i]) + CHAR_TRACKING;
+          total += glyphAdvance(font, glyphs[i], emSize) + tracking;
           if (i < glyphs.length - 1) {
-            total += kernBetween(glyphs[i], glyphs[i + 1]);
+            total += kernBetween(font, glyphs[i], glyphs[i + 1], emSize);
           }
         }
         return total;
       }
 
-      /**
-       * Builds a THREE.Mesh for a single character glyph.
-       * The mesh is positioned at (xOffset, 0, 0) in local space.
-       * Its material starts at opacity 1.0 and is transparent-capable
-       * so the exit animation can fade it without a material swap.
-       *
-       * Returns null for glyphs with no visible geometry (space, etc.).
-       *
-       * @param  {opentype.Glyph} glyph
-       * @param  {number}         xOffset   - horizontal position in world units
-       * @returns {THREE.Mesh|null}
-       */
-      function buildCharMesh(glyph, xOffset) {
-        const shapes = buildGlyphShapes(glyph, xOffset, CHAR_SIZE_DYN);
-        if (!shapes || shapes.length === 0) return null;
-
-        // Merge all contour shapes into a single ShapeGeometry.
-        // THREE.ShapeGeometry accepts an array of Shape objects and
-        // correctly handles holes when the winding order matches SVG fill-rule.
+      function buildCharMesh(glyph, xOffset, emSize, color) {
+        const shapes = buildGlyphShapes(glyph, xOffset, emSize);
+        if (!shapes.length) return null; // whitespace
         const geo = new THREE.ShapeGeometry(shapes, CURVE_SEGS);
-
         const mat = new THREE.MeshBasicMaterial({
-          color:      COL_BLACK,
+          color,
           transparent: true,
-          opacity:    1.0,
-          side:       THREE.DoubleSide,
+          opacity: 1.0,
+          side: THREE.DoubleSide,
           depthWrite: false,
         });
-
         return new THREE.Mesh(geo, mat);
       }
 
-      /* ──────────────────────────────────────────────────────────
-       * § 6  CHAR ENTRY POOL
-       *
-       * A CharEntry represents a single row of character meshes (one
-       * phrase, word, or character unit) currently alive in the scene.
-       *
-       * Structure:
-       *   {
-       *     group:       THREE.Group   — parent transform for the whole row
-       *     chars:       Array<{
-       *                    mesh:       THREE.Mesh — the ShapeGeometry mesh
-       *                    velY:       number     — spring velocity (Y axis)
-       *                    targetY:    number     — spring rest position  (=0)
-       *                    active:     boolean    — false until stagger delay fires
-       *                    startTime:  number     — performance.now() when activated
-       *                  }>
-       *     state:       "entering" | "resting" | "exiting"
-       *   }
-       *
-       * activeRow    — the CharEntry currently sliding in or at rest
-       * exitingRows  — array of CharEntries currently drifting and fading out
-       * ────────────────────────────────────────────────────────── */
-      let activeRow    = null;
+      /* ── § 6  CHAR ROW POOL ──────────────────────────────────────────── */
+      let activeRow = null;
       const exitingRows = [];
 
-      /**
-       * Disposes all GPU resources for a CharEntry and removes it from the scene.
-       *
-       * @param {object} entry - a CharEntry
-       */
       function disposeEntry(entry) {
         scene.remove(entry.group);
-        for (let i = 0; i < entry.chars.length; i++) {
-          const c = entry.chars[i];
+        for (const c of entry.chars) {
           if (c.mesh) {
             c.mesh.geometry.dispose();
             c.mesh.material.dispose();
@@ -623,216 +415,146 @@
         }
       }
 
-      /* ──────────────────────────────────────────────────────────
-       * § 7  onTextUnitPlay  —  THE COTODAMA ANIMATION CORE
-       *
-       * Called by TextAlive's addListener({ onTextUnitPlay(unit){} })
-       * every time a lyric unit (IChar, IWord, or IPhrase) begins playing.
-       *
-       * TextAlive ITextUnit hierarchy:
-       *
-       *   IPhrase   getType() === 1   — a full phrase/line
-       *     └─ IWord     getType() === 2   — a word (may group kana/kanji)
-       *          └─ IChar    getType() === 3   — a single Unicode character
-       *
-       * Strategy (mirroring char-cube):
-       *   We listen at the PHRASE level for pacing.  When a phrase fires we
-       *   render the entire phrase text as individual character meshes with a
-       *   short stagger delay between each, so the word "arrives" as a sweep
-       *   rather than an instant pop — exactly what Cotodama does.
-       *
-       *   If no phrase-level data is available (some songs have only word-level
-       *   lyrics) we fall through to render the word.  Character-level units are
-       *   handled only when the unit has no parent phrase (standalone chars).
-       *
-       * Per-character mesh layout:
-       *   1. Measure total string width via measureString().
-       *   2. Walk glyphs left-to-right, accumulating pen X.
-       *   3. Each char mesh spawns at (penX - totalWidth/2, SPAWN_Y, 0).
-       *   4. Its stagger delay = charIndex * CHAR_STAGGER_MS.
-       *   5. After the delay, the spring starts pulling its Y toward 0.
-       *
-       * @param {ITextUnit} unit  - TextAlive text unit (IPhrase, IWord or IChar)
-       */
-      function onTextUnitPlay(unit) {
+      /* ── § 7  SPAWN ROW (mood-driven) ────────────────────────────────── */
+      function spawnRow(text, motion) {
+        const raw = (text || "").trim();
+        if (!raw || !otSerif) return;
 
-        // ── Guard: ignore null / empty ───────────────────────────
-        if (!unit || typeof unit.text !== "string") return;
+        const font = motion.font === "sans" && otSans ? otSans : otSerif;
+        const emSize = CHAR_SIZE * motion.sizeMul;
+        const tracking = CHAR_SIZE * motion.trackMul;
+        const spawnY = CHAR_SIZE * motion.spawnYMul;
+        const color = new THREE.Color().setHSL(motion.hsl.h, motion.hsl.s, motion.hsl.l);
 
-        // ── Unit type discrimination ─────────────────────────────
-        // ITextUnit.getType() returns a numeric code:
-        //   1 = IPhrase   (full line)
-        //   2 = IWord
-        //   3 = IChar     (single character)
-        //
-        // We only want to spawn a new row at the phrase or word boundary,
-        // not for every individual character — that would create O(n) rows
-        // per phrase where n = character count.
-        const unitType = unit.getType ? unit.getType() : 0;
-
-        // If this is an IChar (type 3) AND it has a parent word/phrase,
-        // skip it — the parent phrase/word will handle the full render.
-        // We only process IChar when it fires as a top-level unit (type 3
-        // with no parent, or when the player is operating in char-only mode).
-        if (unitType === 3 && unit.parent && unit.parent.text) {
-          return;
-        }
-
-        // Extract the display text.  Prefer the unit's own .text; if it's
-        // an IPhrase we want the full phrase string (which .text provides).
-        const raw = unit.text.trim();
-        if (raw === "") return;
-
-        // ── Push current row to exit queue ───────────────────────
-        if (activeRow !== null) {
-          activeRow.state = "exiting";
+        // Retire the current row.
+        if (activeRow) {
           exitingRows.push(activeRow);
           activeRow = null;
         }
 
-        // ── Build the new row ────────────────────────────────────
-        if (!otFont) {
-          console.warn("[LyricSpeaker] Font not loaded yet; skipping unit:", raw);
-          return;
-        }
-
-        const glyphs     = otFont.stringToGlyphs(raw);
-        const totalWidth = measureString(raw);
-        const halfWidth  = totalWidth / 2;
-
-        // Root group: translated so the row is horizontally centred at X=0.
-        // Individual character meshes are positioned relative to this group.
+        const glyphs = font.stringToGlyphs(raw);
+        const halfWidth = measureString(font, raw, emSize, tracking) / 2;
         const group = new THREE.Group();
-        group.position.set(0, 0, 0);
         scene.add(group);
 
-        const charEntries = [];
+        const chars = [];
         let penX = -halfWidth;
         const spawnTime = performance.now();
 
         for (let gi = 0; gi < glyphs.length; gi++) {
           const glyph = glyphs[gi];
-          const adv   = glyphAdvance(glyph) + CHAR_TRACKING;
-          const kern  = gi < glyphs.length - 1
-            ? kernBetween(glyph, glyphs[gi + 1])
-            : 0;
-
-          // Build the mesh.  buildCharMesh positions the geometry at penX
-          // on the X axis; we then place it at SPAWN_Y and animate it up.
-          const mesh = buildCharMesh(glyph, penX);
-
+          const adv = glyphAdvance(font, glyph, emSize) + tracking;
+          const kern = gi < glyphs.length - 1 ? kernBetween(font, glyph, glyphs[gi + 1], emSize) : 0;
+          const mesh = buildCharMesh(glyph, penX, emSize, color);
           if (mesh) {
-            // Start below the viewport
-            mesh.position.y = SPAWN_Y;
+            mesh.position.y = spawnY;
             mesh.position.z = 0;
             group.add(mesh);
           }
-
-          charEntries.push({
-            mesh:      mesh,           // null for whitespace glyphs
-            velY:      0,              // spring velocity
-            targetY:   0,              // spring resting position (world centre)
-            active:    false,          // becomes true after stagger delay
+          chars.push({
+            mesh,
+            velY: 0,
+            targetY: 0,
+            active: false,
             startTime: spawnTime + gi * CHAR_STAGGER_MS,
           });
-
           penX += adv + kern;
         }
 
-        activeRow = {
-          group:  group,
-          chars:  charEntries,
-          state:  "entering",
-        };
+        activeRow = { group, chars, motion };
       }
 
-      /* ──────────────────────────────────────────────────────────
-       * § 8  ANIMATION LOOP
-       *
-       * Called every frame via requestAnimationFrame.
-       *
-       * Phase A  — ENTERING / RESTING:
-       *   For the activeRow, iterate every char entry.  If the current
-       *   time has passed the char's startTime, mark it active and apply
-       *   the under-damped spring toward targetY=0.
-       *
-       *   Spring formula (explicit Euler, stable at 60 fps):
-       *     acceleration = (targetY - currentY) * SPR_STIFFNESS
-       *     velocity     = velocity * SPR_DAMPING + acceleration
-       *     position.y   += velocity
-       *
-       * Phase B  — EXITING:
-       *   For every entry in exitingRows, each frame:
-       *     • group.position.z -= DRIFT_Z   (drift backward into depth)
-       *     • each char mesh.material.opacity -= FADE_RATE  (fade to 0)
-       *   Once all characters in a row have opacity ≤ 0, dispose and
-       *   remove the entry from exitingRows.
-       * ────────────────────────────────────────────────────────── */
+      /* ── § 8  LYRIC PUMP (poll-based, latency-offset aware) ──────────────
+       * Driven from the render loop rather than onTextUnitPlay so the latency
+       * offset can shift the timeline cleanly in either direction. We read the
+       * phrase that is active at (currentPos - OUTPUT_LATENCY_MS) and spawn it
+       * once, at its onset. */
+      let player = null;
+      let playing = false;
+      let currentPos = 0;
+      let lastPhraseStart = -1;
+      let latestMotion = moodToMotion({ valence: 0, arousal: 0, energy: 0 });
+      let OUTPUT_LATENCY_MS = 0; // calibrate with [ and ] keys
+
+      function pumpLyrics() {
+        if (!player || !playing || !player.video) return;
+
+        // Refresh mood every frame (cheap reads from preloaded arrays) so the
+        // beat shake and next spawn always reflect the current passage.
+        latestMotion = moodToMotion(sampleMood(player, currentPos));
+
+        const t = currentPos - OUTPUT_LATENCY_MS;
+        if (t < 0) return;
+
+        let phrase;
+        try {
+          phrase = player.video.findPhrase(t);
+        } catch (_) {
+          return;
+        }
+        if (phrase && t >= phrase.startTime && phrase.startTime !== lastPhraseStart) {
+          lastPhraseStart = phrase.startTime;
+          spawnRow(phrase.text, latestMotion);
+        }
+      }
+
+      /* ── § 9  ANIMATION LOOP ─────────────────────────────────────────── */
       function tick() {
         requestAnimationFrame(tick);
-
         const now = performance.now();
 
-        // ── Phase A: spring slide-in ─────────────────────────────
-        if (activeRow !== null) {
-          let allSettled = true;
+        pumpLyrics();
 
-          for (let ci = 0; ci < activeRow.chars.length; ci++) {
-            const c = activeRow.chars[ci];
-            if (!c.mesh) continue; // whitespace — no mesh
-
-            if (!c.active) {
-              if (now >= c.startTime) {
-                c.active = true;
-              } else {
-                // Keep mesh parked below until its stagger fires
-                allSettled = false;
-                continue;
-              }
-            }
-
-            // Spring physics
-            const dy  = c.targetY - c.mesh.position.y;
-            c.velY    = c.velY * SPR_DAMPING_DYN + dy * SPR_STIFFNESS_DYN;
-            c.mesh.position.y += c.velY;
-
-            // Consider settled when velocity is negligible and very close to target
-            if (Math.abs(c.velY) > 0.0005 || Math.abs(dy) > 0.001) {
-              allSettled = false;
-            }
+        // Beat-synced camera shake (gated by mood.shake / vocal energy).
+        let shook = false;
+        if (playing && latestMotion.shake > 0 && player && player.findBeat) {
+          let beat = null;
+          try {
+            beat = player.findBeat(currentPos);
+          } catch (_) {}
+          if (beat) {
+            const pulse = 1 - beat.progress(currentPos); // hardest on downbeat
+            const amp = latestMotion.shake * pulse;
+            camera.position.x = Math.sin(now * 0.05) * amp;
+            camera.position.y = Math.cos(now * 0.06) * amp;
+            shook = true;
           }
+        }
+        if (!shook) {
+          camera.position.x *= 0.9;
+          camera.position.y *= 0.9;
+        }
+        camera.lookAt(0, 0, 0);
 
-          if (allSettled) {
-            activeRow.state = "resting";
+        // Phase A: spring slide-in for the active row.
+        if (activeRow) {
+          const { stiffness, damping } = activeRow.motion;
+          for (const c of activeRow.chars) {
+            if (!c.mesh) continue;
+            if (!c.active) {
+              if (now >= c.startTime) c.active = true;
+              else continue;
+            }
+            const dy = c.targetY - c.mesh.position.y;
+            c.velY = c.velY * damping + dy * stiffness;
+            c.mesh.position.y += c.velY;
           }
         }
 
-        // ── Phase B: Z-drift + opacity fade for exiting rows ─────
+        // Phase B: Z-drift + opacity fade for exiting rows.
         for (let ri = exitingRows.length - 1; ri >= 0; ri--) {
-          const row  = exitingRows[ri];
-          const grp  = row.group;
-
-          // Drift the whole group backward in Z
-          grp.position.z -= DRIFT_Z;
-
-          let rowFullyFaded = true;
-
-          for (let ci = 0; ci < row.chars.length; ci++) {
-            const c = row.chars[ci];
+          const row = exitingRows[ri];
+          row.group.position.z -= DRIFT_Z;
+          let faded = true;
+          for (const c of row.chars) {
             if (!c.mesh) continue;
-
             const mat = c.mesh.material;
             if (mat.opacity > 0) {
-              mat.opacity -= FADE_RATE;
-              if (mat.opacity < 0) {
-                mat.opacity = 0;
-              } else {
-                rowFullyFaded = false;
-              }
+              mat.opacity = Math.max(0, mat.opacity - row.motion.fadeRate);
+              if (mat.opacity > 0) faded = false;
             }
           }
-
-          if (rowFullyFaded) {
+          if (faded) {
             disposeEntry(row);
             exitingRows.splice(ri, 1);
           }
@@ -840,373 +562,152 @@
 
         renderer.render(scene, camera);
       }
-
-      // Kick off the render loop immediately
       tick();
 
-      /* ──────────────────────────────────────────────────────────
-       * § 9  AUDIO CAPTURE  —  Windows Bluetooth A2DP Loopback
-       *
-       * Strategy (two-stage waterfall):
-       *
-       * Stage 1 — getDisplayMedia() with audio-only:
-       *   Chromium/Electron on Windows exposes the entire system audio
-       *   mix (including Bluetooth A2DP output from a paired phone) as a
-       *   desktop capture source when audio: { mandatory: { chromeMediaSource:
-       *   'desktop' } } is passed. Electron's main.js auto-approves the
-       *   'audioCapture' permission so no OS popup appears.
-       *
-       * Stage 2 — getUserMedia() fallback:
-       *   If getDisplayMedia fails (e.g. on macOS or when the user declines),
-       *   fall back to the default audio input. On Windows this is the system
-       *   default microphone unless the user has set a virtual audio cable
-       *   (VB-Cable, Voicemeeter) as the default input device.
-       *
-       * Web Audio graph:
-       *   MediaStream → MediaStreamSourceNode
-       *     ├─ → audioContext.destination  (pass-through to speakers)
-       *     └─ → MediaStreamDestinationNode
-       *              └─ → HTMLAudioElement.srcObject  (time-source for TextAlive)
-       *
-       * The HTMLAudioElement is muted to prevent double-playback; the
-       * Web Audio pass-through handles actual speaker output.
-       * ────────────────────────────────────────────────────────── */
-      let audioCtx       = null;
-      let audioSrcNode   = null;
-      let audioEl        = null;
-      let captureStream  = null;
-
-      async function initAudioCapture() {
-        // ── Stage 1: desktop audio loopback ─────────────────────
-        try {
-          captureStream = await navigator.mediaDevices.getDisplayMedia({
-            video: false,
-            audio: {
-              mandatory: {
-                chromeMediaSource: "desktop",
-              },
-              echoCancellation:  false,
-              noiseSuppression:  false,
-              autoGainControl:   false,
-              sampleRate:        44100,
-            },
-          });
-          setStatus("System audio loopback captured");
-        } catch (displayErr) {
-          console.warn(
-            "[LyricSpeaker] getDisplayMedia failed, falling back to getUserMedia:",
-            displayErr.message
-          );
-
-          // ── Stage 2: microphone / virtual audio cable ──────────
-          try {
-            captureStream = await navigator.mediaDevices.getUserMedia({
-              audio: {
-                echoCancellation: false,
-                noiseSuppression: false,
-                autoGainControl:  false,
-                sampleRate:       44100,
-              },
-              video: false,
-            });
-            setStatus("Microphone / virtual audio captured");
-          } catch (micErr) {
-            showError("Audio capture failed: " + micErr.message);
-            throw micErr;
-          }
-        }
-
-        // ── Web Audio graph ──────────────────────────────────────
-        audioCtx = new (window.AudioContext || window.webkitAudioContext)({
-          sampleRate:  44100,
-          latencyHint: "playback",
-        });
-
-        audioSrcNode = audioCtx.createMediaStreamSource(captureStream);
-
-        // Branch 1: speaker pass-through (user continues hearing music)
-        audioSrcNode.connect(audioCtx.destination);
-
-        // Branch 2: clean MediaStream destination for <audio> srcObject
-        const destNode = audioCtx.createMediaStreamDestination();
-        audioSrcNode.connect(destNode);
-
-        // HTMLAudioElement used as the time-source by TextAlive
-        audioEl            = document.createElement("audio");
-        audioEl.srcObject  = destNode.stream;
-        audioEl.muted      = true; // already routed to speakers above
-        audioEl.play().catch(e =>
-          console.warn("[LyricSpeaker] audio element .play():", e.message)
-        );
-
-        return audioEl;
-      }
-
-      /* ──────────────────────────────────────────────────────────
-       * §10  TEXTALIVE PLAYER INTEGRATION
-       *
-       * TextAlive App API UMD bundle exposes window.TextAliveAppApi.
-       * We construct a Player, attach our listener object (which contains
-       * the onTextUnitPlay handler from § 7), then call
-       * player.createFromAudioElement(audioEl) to bind the time-sync.
-       *
-       * Listener callbacks used:
-       *   onAppReady(app)       — fires when the Player is initialised
-       *   onVideoReady(v)       — fires when lyric/timing data is loaded
-       *   onTimerReady()        — fires when the sync timer starts
-       *   onTextUnitPlay(unit)  — fires at each lyric unit start time  ← OUR CORE
-       *   onTimeUpdate(pos)     — fires ≈ every 50 ms with playback position
-       *   onPlay / onPause / onStop
-       * ────────────────────────────────────────────────────────── */
-      let player = null;
-
-      async function initTextAlive(sourceAudioEl) {
-        const API = window.TextAliveAppApi;
+      /* ── §10  TEXTALIVE PLAYER ───────────────────────────────────────── */
+      function initPlayer() {
+        const API = window.TextAliveApp;
         if (!API || !API.Player) {
-          showError(
-            "TextAlive App API not loaded. " +
-            "Check: node_modules/textalive-app-api/dist/index.js"
-          );
-          return;
+          showError("TextAlive App API failed to load (window.TextAliveApp missing).");
+          return false;
         }
-
         player = new API.Player({
-          app: {
-            // Paste your TextAlive developer token here once registered at
-            // https://developer.textalive.jp — without it the player runs in
-            // public sandbox / managed-host mode only.
-            token: "",
-          },
-          mediaElement: sourceAudioEl,
+          app: { token: TEXTALIVE_TOKEN },
+          valenceArousalEnabled: true, // enables getValenceArousal()
+          vocalAmplitudeEnabled: true, // enables getVocalAmplitude()
         });
 
         player.addListener({
-
-          // ── Song metadata ──────────────────────────────────────
           onAppReady(app) {
-            if (!app.managed) {
-              // Not connected to a TextAlive host — standalone mode.
-              setStatus("TextAlive ready  ·  waiting for lyrics data");
-            }
+            if (!app || !app.managed) setStatus("Ready · paste a song URL");
           },
-
-          onVideoReady(v) {
-            // Analyze the mood/vibe from tempo or beats
-            if (player && player.data && player.data.song && player.data.song.tempo) {
-                if (player.data.song.tempo > 120) {
-                    currentVibe = "energetic";
-                } else {
-                    currentVibe = "calming";
-                }
-            } else {
-               currentVibe = "calming";
-            }
-            if (typeof updatePhysicsParams !== "undefined") {
-               updatePhysicsParams();
-            }
-            startPrompt.classList.add("hidden");
-
-            // Lyric timing data has arrived.
-            const title  = (player.data && player.data.song && player.data.song.name)
-              ? player.data.song.name
-              : "—";
-            const artist = (player.data && player.data.song && player.data.song.artist)
-              ? (player.data.song.artist.name || "—")
-              : "—";
-
-            songTitleEl.textContent  = title.toUpperCase();
-            songArtistEl.textContent = artist;
+          onVideoReady() {
+            const song = player.data && player.data.song;
+            songTitleEl.textContent = (song && song.name ? song.name : "—").toUpperCase();
+            songArtistEl.textContent = song && song.artist ? song.artist.name || "—" : "—";
             songInfo.classList.add("visible");
+            startPrompt.classList.add("hidden");
             setStatus("Lyrics synchronised");
+            player.requestPlay();
           },
-
           onTimerReady() {
             setStatus("Playing");
           },
-
-          // ── CORE LYRIC CALLBACK ────────────────────────────────
-          // This is the complete implementation described in § 7.
-          // We delegate directly to onTextUnitPlay() defined above.
-          onTextUnitPlay(unit) {
-            onTextUnitPlay(unit);
-          },
-
-          // ── Song position (progress bar) ───────────────────────
-          onTimeUpdate(posMs) {
-            if (
-              player         &&
-              player.data    &&
-              player.data.song &&
-              player.data.song.length > 0
-            ) {
-              const pct = (posMs / player.data.song.length) * 100;
-              progressFill.style.width = pct.toFixed(2) + "%";
+          onTimeUpdate(pos) {
+            currentPos = pos; // ms
+            const len = player.data && player.data.song && player.data.song.length;
+            if (len > 0) {
+              // ISong.length's unit isn't documented in the d.ts; a real song in
+              // ms is >> 3000, in seconds it's << 3000, so this disambiguates.
+              const lenMs = len > 3000 ? len : len * 1000;
+              progressFill.style.width = Math.min(100, (pos / lenMs) * 100).toFixed(2) + "%";
             }
           },
-
-          onPlay()  { setStatus("Playing");  },
-          onPause() { setStatus("Paused");   },
-          onStop()  {
-            setStatus("Stopped");
+          onPlay() {
+            playing = true;
+            setStatus("Playing");
+          },
+          onPause() {
+            playing = false;
+            setStatus("Paused");
+          },
+          onStop() {
+            playing = false;
+            lastPhraseStart = -1;
             progressFill.style.width = "0%";
+            setStatus("Stopped");
           },
         });
-
-        // Bind the Player's time-sync mechanism to our audio element.
-        // createFromAudioElement may throw if no song has been identified yet
-        // (expected when Bluetooth streaming starts before a track is recognised).
-        try {
-          await player.createFromAudioElement(sourceAudioEl);
-        } catch (bindErr) {
-          console.warn(
-            "[LyricSpeaker] createFromAudioElement() rejected:",
-            bindErr.message,
-            "— waiting for a new track."
-          );
-          setStatus("Listening for audio stream…");
-        }
+        return true;
       }
 
-      /* ──────────────────────────────────────────────────────────
-       * §11  STARTUP FLOW (DUAL RECEIVERS)
-       * ────────────────────────────────────────────────────────── */
-      const { ipcRenderer } = require('electron');
-
-      let currentVibe = "calming"; // "calming" or "energetic"
-
-      let SPR_STIFFNESS_DYN = SPR_STIFFNESS;
-      let SPR_DAMPING_DYN = SPR_DAMPING;
-      let CHAR_SIZE_DYN = CHAR_SIZE;
-
-      function updatePhysicsParams() {
-          if (currentVibe === "energetic") {
-              // energetic: sharp, rapid, hard-hitting
-              SPR_STIFFNESS_DYN = 0.15;
-              SPR_DAMPING_DYN = 0.60;
-              CHAR_SIZE_DYN = CHAR_SIZE * 1.5; // Larger typography scaling
-          } else {
-              // calming: elegant, smooth, flowing
-              SPR_STIFFNESS_DYN = 0.03;
-              SPR_DAMPING_DYN = 0.85;
-              CHAR_SIZE_DYN = CHAR_SIZE;
-          }
-      }
-
-      async function startReceivers() {
-        startPrompt.classList.remove("hidden");
-        const btn = document.getElementById('connect-btn');
-        const desc = document.getElementById('prompt-desc');
-
-        btn.style.display = 'none';
-        if (desc) {
-          desc.innerHTML = "Searching for connections...<br/>Play audio via AirPlay or Bluetooth A2DP";
-          desc.classList.add("searching");
-        }
-        setStatus("Listening...");
-
+      async function loadSong(url) {
+        if (!player && !initPlayer()) return;
+        promptDesc.classList.add("searching");
+        promptDesc.textContent = "Loading lyric & beat data…";
+        setStatus("Loading…");
         try {
-          await loadFont();
-
-          // 1. Start System Audio Capture (For Bluetooth A2DP loopback)
-          const el = await initAudioCapture();
-          await initTextAlive(el);
-
-          // 2. Start AirPlay Server via IPC
-          ipcRenderer.on('airplay-status', (_event, value) => {
-            console.log(value);
-            if (value.startsWith('Connected:')) {
-              setStatus(value);
-              if (desc) {
-                desc.classList.remove("searching");
-                desc.innerHTML = value + "<br/>Waiting for playback...";
-              }
-            }
-          });
-          ipcRenderer.on('airplay-event', (_event, value) => {
-            if (value === 'play') {
-              console.log('Airplay client playing');
-              startPrompt.classList.add("hidden");
-              setStatus("Playing (AirPlay)");
-            } else if (value === 'stop') {
-              console.log('Airplay client stopped');
-            }
-          });
-          ipcRenderer.on('airplay-error', (_event, value) => {
-            showError("Airplay error: " + value);
-          });
-
-          /* BACKWARD COMPAT (If ipcRenderer raw is needed, ignore safely) */
-          try {
-            ipcRenderer.send('start-airplay');
-          } catch(e) { console.warn('IPC Send bypass', e); }
-
-          // Automatically hide prompt if Audio context starts resolving real media
-          if (typeof audioEl !== 'undefined' && audioEl) {
-             audioEl.addEventListener('play', () => {
-               startPrompt.classList.add("hidden");
-               setStatus("Connected via Bluetooth");
-             });
-          }
-
+          await player.createFromSongUrl(url);
+          // onVideoReady fires when the timeline is ready and starts playback.
         } catch (err) {
-          console.error("[LyricSpeaker] Startup error:", err);
-          showError(err.message || "Initialisation failed");
-          if (desc) {
-            desc.classList.remove("searching");
-            desc.innerHTML = "Dual Receiver Mode<br />AirPlay (iOS) or Classic Bluetooth (Android)";
-          }
-          btn.style.display = 'block';
+          promptDesc.classList.remove("searching");
+          promptDesc.textContent = "Could not load that song. Check the URL / token.";
+          showError("Load failed: " + (err && err.message ? err.message : err));
         }
       }
 
-      connectBtn.addEventListener("click", () => {
-         startReceivers();
+      /* ── §11  STARTUP / INPUT ────────────────────────────────────────── */
+      // Support the official ?ta_song_url= convention for quick testing.
+      const qsUrl = new URLSearchParams(location.search).get("ta_song_url");
+      if (qsUrl) songUrlInput.value = qsUrl;
+
+      function handleLoad() {
+        const url = songUrlInput.value.trim();
+        if (!url) {
+          showError("Paste a TextAlive-registered song URL first.");
+          return;
+        }
+        loadSong(url);
+      }
+      connectBtn.addEventListener("click", handleLoad);
+      songUrlInput.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") handleLoad();
       });
 
-      /* ──────────────────────────────────────────────────────────
-       * §12  UTILITY HELPERS + KEYBOARD SHORTCUTS
-       * ────────────────────────────────────────────────────────── */
-
-      /**
-       * Updates the bottom-right status label.
-       * @param {string} msg
-       */
-      function setStatus(msg) {
-        statusBar.textContent = msg.toUpperCase();
+      // Optional: surface AirPlay receiver status if the user starts it. Output
+      // routing is OS-level and not required for lyric sync here.
+      if (window.lyricSpeaker) {
+        window.lyricSpeaker.onAirplayStatus((v) => setStatus(v));
+        window.lyricSpeaker.onAirplayError((v) => showError(v));
       }
 
-      /**
-       * Shows a transient error toast for 5 seconds.
-       * @param {string} msg
-       */
+      /* ── §12  UTILITIES + SHORTCUTS ──────────────────────────────────── */
+      function setStatus(msg) {
+        statusBar.textContent = String(msg).toUpperCase();
+      }
+      let errorTimer = null;
       function showError(msg) {
         errorToast.textContent = msg;
         errorToast.classList.add("visible");
-        setTimeout(() => {
-          errorToast.classList.remove("visible");
-        }, 5000);
+        clearTimeout(errorTimer);
+        errorTimer = setTimeout(() => errorToast.classList.remove("visible"), 5000);
       }
 
-      // Space  → play / pause
-      // R      → stop and reset progress bar
-      // Escape → same as R
       document.addEventListener("keydown", (e) => {
+        // [ / ] : nudge lyric latency offset (compensate AirPlay/Bluetooth delay)
+        if (e.code === "BracketLeft") {
+          OUTPUT_LATENCY_MS = Math.max(-2000, OUTPUT_LATENCY_MS - 25);
+          setStatus("Lyric offset " + OUTPUT_LATENCY_MS + " ms");
+        } else if (e.code === "BracketRight") {
+          OUTPUT_LATENCY_MS = Math.min(2000, OUTPUT_LATENCY_MS + 25);
+          setStatus("Lyric offset " + OUTPUT_LATENCY_MS + " ms");
+        }
         if (!player) return;
-
         if (e.code === "Space") {
           e.preventDefault();
-          if (player.isPlaying) {
-            player.requestPause();
-          } else {
-            player.requestPlay();
-          }
+          player.isPlaying ? player.requestPause() : player.requestPlay();
         }
-
         if (e.code === "KeyR" || e.code === "Escape") {
           player.requestStop();
           progressFill.style.width = "0%";
         }
       });
+
+      // Preload fonts up front so the first phrase renders instantly.
+      loadFont(SERIF_FONT_URL)
+        .then((f) => {
+          otSerif = f;
+        })
+        .catch((err) => showError("Serif font load failed: " + err.message));
+      if (SANS_FONT_URL) {
+        loadFont(SANS_FONT_URL)
+          .then((f) => {
+            otSans = f;
+          })
+          .catch(() => {
+            /* sans optional — fall back to serif */
+          });
+      }
     </script>
   </body>
 </html>
